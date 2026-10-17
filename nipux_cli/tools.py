@@ -1766,7 +1766,8 @@ def _web_call(name: str, args: dict[str, Any], ctx: ToolContext) -> str:
     if provider == "parallel":
         from nipux_cli import parallel_web as web
 
-        options["session_id"] = ctx.job_id
+        job = ctx.db.get_job(ctx.job_id)
+        options["session_id"] = f"{ctx.job_id}:{job['created_at']}"
     elif provider != "duckduckgo":
         raise ValueError(f"Unknown search provider: {provider!r}; use duckduckgo or parallel")
 

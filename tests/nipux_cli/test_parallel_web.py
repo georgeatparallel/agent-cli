@@ -121,7 +121,8 @@ def test_registry_search_and_fetch_use_mcp_http(context, mcp_server, sse, struct
     messages = [json.loads(request.content) for request in requests]
     assert [m["method"] for m in messages].count("tools/list") == 2
     calls = [m["params"] for m in messages if m["method"] == "tools/call"]
-    session = hashlib.sha256(context.job_id.encode()).hexdigest()
+    identity = f"{context.job_id}:{context.db.get_job(context.job_id)['created_at']}"
+    session = hashlib.sha256(identity.encode()).hexdigest()
     assert calls == [
         {"name": "web_search", "arguments": {
             "objective": "source evidence", "search_queries": ["source evidence"], "session_id": session,
@@ -130,6 +131,30 @@ def test_registry_search_and_fetch_use_mcp_http(context, mcp_server, sse, struct
             "urls": ["https://example.com/source"], "full_content": True, "session_id": session,
         }},
     ]
+
+
+def test_session_identity_is_stable_after_restart_and_distinguishes_same_slug(context, mcp_server, tmp_path):
+    requests, _, _ = mcp_server
+    DEFAULT_REGISTRY.handle("web_search", {"query": "source evidence"}, context)
+    other_path = tmp_path / "other.db"
+    other_db = AgentDB(other_path)
+    try:
+        other_job = other_db.create_job("Collect evidence", title="evidence", kind="generic")
+        assert other_job == context.job_id
+        DEFAULT_REGISTRY.handle("web_search", {"query": "source evidence"}, replace(context, db=other_db))
+    finally:
+        other_db.close()
+    reopened = AgentDB(other_path)
+    try:
+        DEFAULT_REGISTRY.handle("web_search", {"query": "source evidence"}, replace(context, db=reopened))
+    finally:
+        reopened.close()
+    sessions = [
+        json.loads(r.content)["params"]["arguments"]["session_id"]
+        for r in requests if json.loads(r.content)["method"] == "tools/call"
+    ]
+    assert sessions[0] != sessions[1]
+    assert sessions[1] == sessions[2]
 
 
 @pytest.mark.parametrize("name,args", [
